@@ -295,7 +295,6 @@ int main(int argc, char* argv[]) {
                     else if(letter_index == wordle_letter_count) {
                         int board_offset = try_index * wordle_letter_count;
                         bool correct = wordle_try_match(full_letter_board + board_offset, correct_word, full_result_board + board_offset, wordle_letter_count);
-                        // TODO: check correctness
                         if(wordle_validate_word(all_words, word_count, full_letter_board + board_offset)) {
                             try_index++;
                             if(correct) {
