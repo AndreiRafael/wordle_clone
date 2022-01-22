@@ -1,3 +1,11 @@
+#if (defined(__MINGW32__) || defined(__GNUC__)) && defined(_WIN32)
+#define SDL_MAIN_HANDLED
+#endif
+
+#ifdef _MSC_VER
+#define _CRT_SECURE_NO_WARNINGS
+#endif//_MSC_VER
+
 #include <sdl/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -163,11 +171,21 @@ char* wordle_read_words(const char* file_path, int* word_count) {
 
     int line_count = 1;
     {
+        int counted_valid = 0;
         char c;
         while((c = (char)fgetc(f)) != EOF) {
             if(c == '\n') {
                 line_count++;
+                counted_valid = 0;
             }
+            else {
+                counted_valid++;
+            }
+        }
+
+        //last line bad formatting check
+        if(counted_valid < wordle_letter_count) {
+            line_count--;
         }
     }
     rewind(f);
@@ -178,7 +196,7 @@ char* wordle_read_words(const char* file_path, int* word_count) {
         int word_index = 0;
         int letter_index = 0;
         char c;
-        while((c = (char)fgetc(f)) != EOF) {
+        while((c = (char)fgetc(f)) != EOF && word_index < line_count) {
             char* word_ptr = out_arr + wordle_letter_count * word_index;
             if(c == '\n') {
                 word_index++;
@@ -217,6 +235,9 @@ void wordle_select_word(char* word_arr, int word_count, char* buffer) {
 int main(int argc, char* argv[]) {
     (void)argc;
     (void)argv;
+    #ifdef SDL_MAIN_HANDLED
+    SDL_SetMainReady();
+    #endif
 
     if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
         printf("Could not initialize SDL: %s\n", SDL_GetError());
@@ -260,7 +281,7 @@ int main(int argc, char* argv[]) {
     }
 
     int word_count;
-    char correct_word[wordle_letter_count];
+    char* correct_word = malloc(sizeof(char) * (size_t)wordle_letter_count);
     char* all_words = wordle_read_words("./res/sgb-words.txt", &word_count);
     wordle_select_word(all_words, word_count, correct_word);
 
@@ -352,6 +373,7 @@ int main(int argc, char* argv[]) {
         SDL_RenderPresent(renderer);
     }
 
+    free(correct_word);
     free(all_words);
     free(full_letter_board);
     free(full_result_board);

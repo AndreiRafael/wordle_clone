@@ -37,6 +37,8 @@
 
 #include lib folder
 !lib/sdl/*
+!lib/sdl/win32_mingw/*
+!lib/sdl/win32_vc/*
 
 # CMake
 CMakeLists.txt.user
