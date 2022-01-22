@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <time.h>
+#include <string.h>
 
 const int wordle_padding = 10;
 const int wordle_spacing = 5;
@@ -352,7 +353,7 @@ int main(int argc, char* argv[]) {
         SDL_RenderPresent(renderer);
     }
 
-
+    free(all_words);
     free(full_letter_board);
     free(full_result_board);
     SDL_DestroyTexture(letters_texture);
