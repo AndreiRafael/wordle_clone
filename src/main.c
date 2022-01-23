@@ -87,6 +87,43 @@ void wordle_render_bg(SDL_Renderer* renderer) {
     }
 }
 
+void wordle_draw_word(SDL_Renderer* renderer, SDL_Texture* texture, const char* word, int len, int x, int y, int size) {
+    int start_x = x - (size * len) / 2;
+    int start_y = y - size / 2;
+
+    SDL_SetRenderDrawColor(renderer, 255, 150, 150, 255);
+    SDL_Rect bg_rect = {
+        .x = start_x,
+        .y = start_y,
+        .w = size * len,
+        .h = size
+    };
+    SDL_RenderFillRect(renderer, &bg_rect);
+    for(int i = 0; i < len; i++) {
+        char c = word[i];
+        if(c < 97 || c > 122) {
+            continue;
+        }
+
+        int tex_index = (int)c - 97;
+        SDL_Rect src_rect = {
+            .x = tex_index * wordle_letter_original_size,
+            .y = 0,
+            .w = wordle_letter_original_size,
+            .h = wordle_letter_original_size
+        };
+
+        SDL_Rect dest_rect = {
+            .x = start_x + size * i,
+            .y = start_y,
+            .w = size,
+            .h = size
+        };
+
+        SDL_RenderCopy(renderer, texture, &src_rect, &dest_rect);
+    }
+}
+
 void wordle_render_board(SDL_Renderer* renderer, SDL_Texture* letters_texture, char* board_letters, wordle_match_t* board_results, int try_index, int letter_index) {
     for(int i = 0; i < try_index; i++) {//loop through previous tries
         for(int j = 0; j < wordle_letter_count; j++) {
@@ -244,12 +281,14 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
+    int window_w = wordle_letter_count * wordle_letter_target_size + wordle_padding * 2 + (wordle_letter_count - 1) * wordle_spacing;
+    int window_h = wordle_padding * 2 + wordle_try_count * wordle_letter_target_size + (wordle_try_count - 1) * wordle_spacing;
     SDL_Window* window = SDL_CreateWindow(
         "Wordle",
         SDL_WINDOWPOS_CENTERED,
         SDL_WINDOWPOS_CENTERED,
-        wordle_letter_count * wordle_letter_target_size + wordle_padding * 2 + (wordle_letter_count - 1) * wordle_spacing,//w
-        wordle_padding * 2 + wordle_try_count * wordle_letter_target_size + (wordle_try_count - 1) * wordle_spacing,//h
+        window_w,//w
+        window_h,//h
         SDL_WINDOW_SHOWN
     );
 
@@ -310,8 +349,10 @@ int main(int argc, char* argv[]) {
                     }
                 }
                 else if(keysym.sym == SDLK_KP_ENTER || keysym.sym == SDLK_RETURN || keysym.sym == SDLK_RETURN2) {
-                    if(end_game) {
-                        quit = true;//just quits the game
+                    if(end_game) {//restart the game with a new word
+                        wordle_select_word(all_words, word_count, correct_word);
+                        end_game = won_game = false;
+                        letter_index = try_index = 0;
                     }
                     else if(letter_index == wordle_letter_count) {
                         int board_offset = try_index * wordle_letter_count;
@@ -369,6 +410,9 @@ int main(int argc, char* argv[]) {
 
         wordle_render_bg(renderer);
         wordle_render_board(renderer, letters_texture, full_letter_board, full_result_board, try_index, letter_index);
+        if(end_game && !won_game) {//draw correct word at the center of the screen
+            wordle_draw_word(renderer, letters_texture, correct_word, wordle_letter_count, window_w / 2, window_h / 2, wordle_letter_original_size);
+        }
 
         SDL_RenderPresent(renderer);
     }
