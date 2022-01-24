@@ -29,6 +29,30 @@ typedef enum wordle_match_t {
     wordle_match_correct
 } wordle_match_t;
 
+typedef struct game_data_t {
+    SDL_Renderer* renderer;
+    SDL_Texture* letters_texture;
+    int window_w;
+    int window_h;
+
+    bool quit;
+    bool end_game;
+    bool won_game;
+
+    int try_index;
+    int letter_index;
+
+    int word_count;
+    char* correct_word;
+    char* all_words;
+
+    char* full_letter_board;
+    wordle_match_t* full_result_board;
+
+    float flash_timer;
+    Uint32 prev_ticks;
+} game_data_t;
+
 bool wordle_try_match(char* try_word, char* correct_word, wordle_match_t* results, int len) {
     char* correct_cpy = malloc((size_t)len * sizeof(char));
     for(int i = 0; i < len; i++) {//reset all results and copy correct word
@@ -269,6 +293,108 @@ void wordle_select_word(char* word_arr, int word_count, char* buffer) {
     }
 }
 
+void game_tick(game_data_t* game_data) {
+    SDL_Event e;
+    while(SDL_PollEvent(&e)) {
+        if(e.type == SDL_QUIT) {
+            game_data->quit = true;
+        }
+        else if(e.type == SDL_KEYDOWN) {
+            SDL_Keysym keysym = e.key.keysym;
+            if(keysym.sym == SDLK_BACKSPACE) {
+                if(!game_data->end_game && game_data->letter_index > 0) {
+                    game_data->letter_index--;
+                }
+            }
+            else if(keysym.sym == SDLK_KP_ENTER || keysym.sym == SDLK_RETURN || keysym.sym == SDLK_RETURN2) {
+                if(game_data->end_game) {//restart the game with a new word
+                    wordle_select_word(game_data->all_words, game_data->word_count, game_data->correct_word);
+                    game_data->end_game = game_data->won_game = false;
+                    game_data->letter_index = game_data->try_index = 0;
+                }
+                else if(game_data->letter_index == wordle_letter_count) {
+                    int board_offset = game_data->try_index * wordle_letter_count;
+                    bool correct = wordle_try_match(
+                        game_data->full_letter_board + board_offset, game_data->correct_word,//words
+                        game_data->full_result_board + board_offset,//results
+                        wordle_letter_count
+                    );
+                    if(wordle_validate_word(game_data->all_words, game_data->word_count, game_data->full_letter_board + board_offset)) {
+                        game_data->try_index++;
+                        if(correct) {
+                            game_data->end_game = game_data->won_game = true;
+                        }
+                        else {
+                            if(game_data->try_index >= wordle_try_count) {
+                                game_data->end_game = true;//lost
+                            }
+                        }
+                        game_data->letter_index = 0;
+                    }
+                    else {
+                        game_data->flash_timer = 1.f;
+                    }
+                }
+            }
+            else if(keysym.scancode >= 4 && keysym.scancode <= 29) {
+                if(!game_data->end_game && game_data->letter_index < wordle_letter_count) {//submit letter
+                    int board_index = game_data->try_index * wordle_letter_count + game_data->letter_index;
+                    game_data->full_letter_board[board_index] = (char)((int)keysym.scancode + 93);
+                    game_data->full_result_board[board_index] = wordle_match_unknown;
+                    game_data->letter_index++;
+                }
+            }
+        }
+    }
+
+    //TIMER UPDATE
+    Uint32 new_ticks = SDL_GetTicks();
+    Uint32 delta_ticks = new_ticks - game_data->prev_ticks;
+    game_data->prev_ticks = new_ticks;
+    float delta_time = (float)delta_ticks / 1000.f;
+
+    game_data->flash_timer = SDL_max(game_data->flash_timer - delta_time * 3.f, 0.f);
+
+    //RENDER
+    if(game_data->end_game) {
+        if(game_data->won_game) {
+            SDL_SetRenderDrawColor(game_data->renderer, 150, 255, 150, 255);
+        }
+        else {
+            SDL_SetRenderDrawColor(game_data->renderer, 255, 150, 150, 255);
+        }
+    }
+    else {
+        Uint8 val = 255u - (Uint8)(255.f * game_data->flash_timer);
+        SDL_SetRenderDrawColor(game_data->renderer, 255, val, val, 255);
+    }
+    SDL_RenderClear(game_data->renderer);
+
+    wordle_render_bg(game_data->renderer);
+    wordle_render_board(
+        game_data->renderer, game_data->letters_texture,
+        game_data->full_letter_board, game_data->full_result_board,
+        game_data->try_index, game_data->letter_index
+    );
+    if(game_data->end_game && !game_data->won_game) {//draw correct word at the center of the screen
+        wordle_draw_word(
+            game_data->renderer, game_data->letters_texture,
+            game_data->correct_word, wordle_letter_count,
+            game_data->window_w / 2, game_data->window_h / 2,
+            wordle_letter_original_size
+        );
+    }
+
+    SDL_RenderPresent(game_data->renderer);
+}
+
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+void emscripten_tick(void* arg) {
+    game_tick((game_data_t*)arg);
+}
+#endif//__EMSCRIPTEN__
+
 int main(int argc, char* argv[]) {
     (void)argc;
     (void)argv;
@@ -281,24 +407,25 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    int window_w = wordle_letter_count * wordle_letter_target_size + wordle_padding * 2 + (wordle_letter_count - 1) * wordle_spacing;
-    int window_h = wordle_padding * 2 + wordle_try_count * wordle_letter_target_size + (wordle_try_count - 1) * wordle_spacing;
+    game_data_t game_data;
+
+    game_data.window_w = wordle_letter_count * wordle_letter_target_size + wordle_padding * 2 + (wordle_letter_count - 1) * wordle_spacing;
+    game_data.window_h = wordle_padding * 2 + wordle_try_count * wordle_letter_target_size + (wordle_try_count - 1) * wordle_spacing;
     SDL_Window* window = SDL_CreateWindow(
         "Wordle",
         SDL_WINDOWPOS_CENTERED,
         SDL_WINDOWPOS_CENTERED,
-        window_w,//w
-        window_h,//h
+        game_data.window_w,//w
+        game_data.window_h,//h
         SDL_WINDOW_SHOWN
     );
 
-    SDL_Renderer* renderer = SDL_CreateRenderer(
+    game_data.renderer = SDL_CreateRenderer(
         window,
         -1,
         SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC
     );
 
-    SDL_Texture* letters_texture = NULL;
     {
         SDL_Surface* letters_surf = SDL_LoadBMP("./res/letters.bmp");
         if(letters_surf == NULL) {
@@ -306,123 +433,51 @@ int main(int argc, char* argv[]) {
             return -1;
         }
 
-        letters_texture = SDL_CreateTextureFromSurface(renderer, letters_surf);
-        if(letters_texture == NULL) {
+        game_data.letters_texture = SDL_CreateTextureFromSurface(game_data.renderer, letters_surf);
+        SDL_FreeSurface(letters_surf);
+        if(game_data.letters_texture == NULL) {
             printf("Could not create texture: %s\n", SDL_GetError());
             return -1;
         }
     }
 
-    char* full_letter_board = malloc((size_t)(wordle_try_count * wordle_letter_count) * sizeof(char));
-    wordle_match_t* full_result_board = malloc((size_t)(wordle_try_count * wordle_letter_count) * sizeof(wordle_match_t));
+    game_data.full_letter_board = malloc((size_t)(wordle_try_count * wordle_letter_count) * sizeof(char));
+    game_data.full_result_board = malloc((size_t)(wordle_try_count * wordle_letter_count) * sizeof(wordle_match_t));
     for(int i = 0; i < wordle_try_count * wordle_letter_count; i++) {
-        full_result_board[i] = wordle_match_unknown;
+        game_data.full_result_board[i] = wordle_match_unknown;
     }
 
-    int word_count;
-    char* correct_word = malloc(sizeof(char) * (size_t)wordle_letter_count);
-    char* all_words = wordle_read_words("./res/sgb-words.txt", &word_count);
-    wordle_select_word(all_words, word_count, correct_word);
+    game_data.correct_word = malloc(sizeof(char) * (size_t)wordle_letter_count);
+    game_data.all_words = wordle_read_words("./res/sgb-words.txt", &game_data.word_count);
+    wordle_select_word(game_data.all_words, game_data.word_count, game_data.correct_word);
 
-    int letter_index = 0;
-    int try_index = 0;
+    game_data.letter_index = 0;
+    game_data.try_index = 0;
 
-    bool end_game = false;
-    bool won_game = false;
+    game_data.end_game = false;
+    game_data.won_game = false;
 
-    float flash_timer = 0.f;//flash screen when trying to submit an invalid word
+    game_data.flash_timer = 0.f;//flash screen when trying to submit an invalid word
 
-    bool quit = false;
+    game_data.quit = false;
 
-    Uint32 prev_ticks = SDL_GetTicks();
-    while(!quit) {
-        SDL_Event e;
-        while(SDL_PollEvent(&e)) {
-            if(e.type == SDL_QUIT) {
-                quit = true;
-            }
-            else if(e.type == SDL_KEYDOWN) {
-                SDL_Keysym keysym = e.key.keysym;
-                if(keysym.sym == SDLK_BACKSPACE) {
-                    if(!end_game && letter_index > 0) {
-                        letter_index--;
-                    }
-                }
-                else if(keysym.sym == SDLK_KP_ENTER || keysym.sym == SDLK_RETURN || keysym.sym == SDLK_RETURN2) {
-                    if(end_game) {//restart the game with a new word
-                        wordle_select_word(all_words, word_count, correct_word);
-                        end_game = won_game = false;
-                        letter_index = try_index = 0;
-                    }
-                    else if(letter_index == wordle_letter_count) {
-                        int board_offset = try_index * wordle_letter_count;
-                        bool correct = wordle_try_match(full_letter_board + board_offset, correct_word, full_result_board + board_offset, wordle_letter_count);
-                        if(wordle_validate_word(all_words, word_count, full_letter_board + board_offset)) {
-                            try_index++;
-                            if(correct) {
-                                end_game = won_game = true;
-                            }
-                            else {
-                                if(try_index >= wordle_try_count) {
-                                    end_game = true;//lost
-                                }
-                            }
-                            letter_index = 0;
-                        }
-                        else {
-                            flash_timer = 1.f;
-                        }
-                    }
-                }
-                else if(keysym.scancode >= 4 && keysym.scancode <= 29) {
-                    if(!end_game && letter_index < wordle_letter_count) {//submit letter
-                        int board_index = try_index * wordle_letter_count + letter_index;
-                        full_letter_board[board_index] = (char)((int)keysym.scancode + 93);
-                        full_result_board[board_index] = wordle_match_unknown;
-                        letter_index++;
-                    }
-                }
-            }
-        }
+    game_data.prev_ticks = SDL_GetTicks();
 
-        //TIMER UPDATE
-        Uint32 new_ticks = SDL_GetTicks();
-        Uint32 delta_ticks = new_ticks - prev_ticks;
-        prev_ticks = new_ticks;
-        float delta_time = (float)delta_ticks / 1000.f;
-
-        flash_timer = SDL_max(flash_timer - delta_time * 3.f, 0.f);
-
-        //RENDER
-        if(end_game) {
-            if(won_game) {
-                SDL_SetRenderDrawColor(renderer, 150, 255, 150, 255);
-            }
-            else {
-                SDL_SetRenderDrawColor(renderer, 255, 150, 150, 255);
-            }
-        }
-        else {
-            Uint8 val = 255u - (Uint8)(255.f * flash_timer);
-            SDL_SetRenderDrawColor(renderer, 255, val, val, 255);
-        }
-        SDL_RenderClear(renderer);
-
-        wordle_render_bg(renderer);
-        wordle_render_board(renderer, letters_texture, full_letter_board, full_result_board, try_index, letter_index);
-        if(end_game && !won_game) {//draw correct word at the center of the screen
-            wordle_draw_word(renderer, letters_texture, correct_word, wordle_letter_count, window_w / 2, window_h / 2, wordle_letter_original_size);
-        }
-
-        SDL_RenderPresent(renderer);
+#if defined(__EMSCRIPTEN__)
+    printf("EMSCRIPTEN STARTED!\n");
+    emscripten_set_main_loop_arg(emscripten_tick, (void*)&game_data, 0, 1);
+#else
+    while(!game_data.quit) {
+        game_tick(&game_data);
     }
+#endif
 
-    free(correct_word);
-    free(all_words);
-    free(full_letter_board);
-    free(full_result_board);
-    SDL_DestroyTexture(letters_texture);
-    SDL_DestroyRenderer(renderer);
+    free(game_data.correct_word);
+    free(game_data.all_words);
+    free(game_data.full_letter_board);
+    free(game_data.full_result_board);
+    SDL_DestroyTexture(game_data.letters_texture);
+    SDL_DestroyRenderer(game_data.renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();
 

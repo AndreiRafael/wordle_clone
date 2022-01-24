@@ -23,6 +23,22 @@ else()
 	endif()
 endif()
 
+#emscripten output
+if(EMSCRIPTEN)
+    message("Using emscripten!")
+    set(CMAKE_EXECUTABLE_SUFFIX ".html")
+    set_target_properties(${GAME_TITLE} PROPERTIES LINK_FLAGS "-s DEMANGLE_SUPPORT=1 --preload-file ${CMAKE_SOURCE_DIR}/build/res --bind")
+endif()
+
+#copy assets
+if(EMSCRIPTEN)
+    set(RESOURCES_DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/../res)
+else()
+    set(RESOURCES_DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/res)
+endif()
+file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/res/sgb-words.txt DESTINATION ${RESOURCES_DESTINATION})
+file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/res/letters.bmp DESTINATION ${RESOURCES_DESTINATION})
+
 # Make compiler scream out every possible warning
 if(MSVC)
 	target_compile_options(${GAME_TITLE} PRIVATE /W4 /WX)
@@ -56,6 +72,3 @@ else()
 	find_package(SDL2 REQUIRED)
 	target_link_libraries(${GAME_TITLE} PUBLIC ${SDL2_LIBRARIES})
 endif()
-
-file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/res/sgb-words.txt DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/res)
-file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/res/letters.bmp DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/res)
